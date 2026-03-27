@@ -1,0 +1,78 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  name      String
+  email     String   @unique
+  mobile    String   @unique
+  password  String
+  role      Role     @default(BORROWER)
+  panCard   String?
+  kycStatus KycStatus @default(PENDING)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  loans     Loan[]   @relation("BorrowerLoans")
+  emi       Emi[]    @relation("UserEmis")
+}
+
+model Loan {
+  id              String      @id @default(auto()) @map("_id") @db.ObjectId
+  borrowerId      String      @db.ObjectId
+  borrower        User        @relation("BorrowerLoans", fields: [borrowerId], references: [id])
+  principalAmount Float
+  interestRate    Float       // Annual interest rate
+  tenureMonths    Int
+  processingFee   Float
+  gstDeduction    Float
+  preClosureChg   Float       // Percentage
+  status          LoanStatus  @default(PENDING)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  emis            Emi[]       @relation("LoanEmis")
+}
+
+model Emi {
+  id          String      @id @default(auto()) @map("_id") @db.ObjectId
+  loanId      String      @db.ObjectId
+  loan        Loan        @relation("LoanEmis", fields: [loanId], references: [id])
+  userId      String      @db.ObjectId
+  user        User        @relation("UserEmis", fields: [userId], references: [id])
+  dueDate     DateTime
+  amount      Float
+  status      EmiStatus   @default(UNPAID)
+  paidAt      DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+enum Role {
+  BORROWER
+  LENDER
+}
+
+enum KycStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum LoanStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  ACTIVE
+  CLOSED
+}
+
+enum EmiStatus {
+  UNPAID
+  PAID
+  LATE
+}
