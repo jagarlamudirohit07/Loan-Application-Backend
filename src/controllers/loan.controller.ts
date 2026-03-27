@@ -77,7 +77,7 @@ export const acceptLoanOffer = async (req: AuthRequest, res: Response): Promise<
     const emiAmount = calculateEMI(loan.principalAmount, loan.interestRate, loan.tenureMonths);
 
     // Create EMIs
-    const emis = [];
+    const emis: { loanId: string; userId: string; amount: number; dueDate: Date; status: string }[] = [];
     const currentDate = new Date();
     
     for (let i = 1; i <= loan.tenureMonths; i++) {
