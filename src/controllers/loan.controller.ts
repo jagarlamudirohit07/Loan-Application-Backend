@@ -155,9 +155,7 @@ export const acceptLoanOffer = async (req: AuthRequest, res: Response): Promise<
         },
       });
 
-      for (const emi of emis) {
-        await tx.emi.create({ data: emi });
-      }
+      await tx.emi.createMany({ data: emis });
     });
 
     res.json({ message: 'Loan approved and EMIs generated' });
