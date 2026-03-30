@@ -18,7 +18,11 @@ model User {
   kycStatus KycStatus @default(PENDING)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+   // ✅ Borrower relation
   loans     Loan[]   @relation("BorrowerLoans")
+
+  // ✅ ADD THIS (Fix)
+  loansGiven Loan[]  @relation("LenderLoans")
   emi       Emi[]    @relation("UserEmis")
 }
 
@@ -26,18 +30,22 @@ model Loan {
   id              String      @id @default(auto()) @map("_id") @db.ObjectId
   borrowerId      String      @db.ObjectId
   borrower        User        @relation("BorrowerLoans", fields: [borrowerId], references: [id])
+
+  lenderId        String?     @db.ObjectId   
+  lender          User?       @relation("LenderLoans", fields: [lenderId], references: [id])
+
   principalAmount Float
-  interestRate    Float       // Annual interest rate
+  interestRate    Float
   tenureMonths    Int
   processingFee   Float
   gstDeduction    Float
-  preClosureChg   Float       // Percentage
+  preClosureChg   Float
   status          LoanStatus  @default(PENDING)
+
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
   emis            Emi[]       @relation("LoanEmis")
 }
-
 model Emi {
   id          String      @id @default(auto()) @map("_id") @db.ObjectId
   loanId      String      @db.ObjectId
