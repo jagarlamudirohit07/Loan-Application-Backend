@@ -1,0 +1,439 @@
+# Loan Application Backend — API Documentation
+
+**Base URL:** `https://<your-render-domain>` or `http://localhost:<PORT>`
+
+---
+
+## Authentication
+
+All protected endpoints require a **Bearer token** in the `Authorization` header:
+
+```
+Authorization: Bearer <jwt_token>
+```
+
+Tokens are returned on successful **Register** or **Login**.
+
+---
+
+## Data Models
+
+### User
+| Field | Type | Description |
+|-------|------|-------------|
+| id | `string` | MongoDB ObjectId |
+| name | `string` | Full name |
+| email | `string` | Unique email |
+| mobile | `string` | Unique mobile number |
+| password | `string` | Bcrypt hashed (never returned) |
+| role | `BORROWER` \| `LENDER` | User role |
+| panCard | `string?` | Optional PAN card |
+| kycStatus | `PENDING` \| `APPROVED` \| `REJECTED` | KYC verification status |
+| createdAt | `DateTime` | Account creation timestamp |
+| updatedAt | `DateTime` | Last update timestamp |
+
+### Loan
+| Field | Type | Description |
+|-------|------|-------------|
+| id | `string` | MongoDB ObjectId |
+| borrowerId | `string` | Reference to User |
+| principalAmount | `float` | Loan principal |
+| interestRate | `float` | Annual interest rate (%) |
+| tenureMonths | `int` | Loan duration in months |
+| processingFee | `float` | Processing fee amount |
+| gstDeduction | `float` | GST deduction amount |
+| preClosureChg | `float` | Pre-closure charge (%) |
+| status | `PENDING` \| `APPROVED` \| `REJECTED` \| `ACTIVE` \| `CLOSED` | Loan status |
+| createdAt | `DateTime` | Creation timestamp |
+| updatedAt | `DateTime` | Last update timestamp |
+| emis | `Emi[]` | Related EMI records |
+
+### EMI
+| Field | Type | Description |
+|-------|------|-------------|
+| id | `string` | MongoDB ObjectId |
+| loanId | `string` | Reference to Loan |
+| userId | `string` | Reference to User |
+| dueDate | `DateTime` | EMI due date |
+| amount | `float` | EMI amount |
+| status | `UNPAID` \| `PAID` \| `LATE` | Payment status |
+| paidAt | `DateTime?` | Actual payment date |
+| createdAt | `DateTime` | Creation timestamp |
+| updatedAt | `DateTime` | Last update timestamp |
+
+---
+
+## Endpoints
+
+---
+
+### 1. Health Check
+
+```
+GET /
+```
+
+**Auth:** None
+
+**Response `200`:**
+```json
+{
+  "message": "Loan App API is running"
+}
+```
+
+---
+
+### 2. Register User
+
+```
+POST /api/auth/register
+```
+
+**Auth:** None
+
+**Request Body:**
+```json
+{
+  "name": "Rohit Kumar",
+  "email": "rohit@example.com",
+  "mobile": "9876543210",
+  "password": "securePass123",
+  "role": "BORROWER",
+  "panCard": "ABCDE1234F"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| name | `string` | ✅ | Full name |
+| email | `string` | ✅ | Unique email address |
+| mobile | `string` | ✅ | Unique mobile number |
+| password | `string` | ✅ | Plain text password (hashed on server) |
+| role | `string` | ❌ | `BORROWER` (default) or `LENDER` |
+| panCard | `string` | ❌ | PAN card number. If provided, KYC is auto-approved |
+
+**Response `201` — Success:**
+```json
+{
+  "_id": "665f1a2b3c4d5e6f7a8b9c0d",
+  "name": "Rohit Kumar",
+  "email": "rohit@example.com",
+  "role": "BORROWER",
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6..."
+}
+```
+
+**Response `400` — User exists:**
+```json
+{
+  "message": "User with email or mobile already exists"
+}
+```
+
+---
+
+### 3. Login User
+
+```
+POST /api/auth/login
+```
+
+**Auth:** None
+
+**Request Body:**
+```json
+{
+  "email": "rohit@example.com",
+  "password": "securePass123"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| email | `string` | ✅ | Registered email |
+| password | `string` | ✅ | Account password |
+
+**Response `200` — Success:**
+```json
+{
+  "_id": "665f1a2b3c4d5e6f7a8b9c0d",
+  "name": "Rohit Kumar",
+  "email": "rohit@example.com",
+  "role": "BORROWER",
+  "kycStatus": "APPROVED",
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6..."
+}
+```
+
+**Response `401` — Invalid credentials:**
+```json
+{
+  "message": "Invalid email or password"
+}
+```
+
+---
+
+### 4. Create Loan Offer
+
+```
+POST /api/loans
+```
+
+**Auth:** 🔒 Bearer Token — **LENDER** role only
+
+**Request Body:**
+```json
+{
+  "borrowerId": "665f1a2b3c4d5e6f7a8b9c0d",
+  "principalAmount": 100000,
+  "interestRate": 12.5,
+  "tenureMonths": 12,
+  "processingFee": 2000,
+  "gstDeduction": 360,
+  "preClosureChg": 4
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| borrowerId | `string` | ✅ | Target borrower's user ID |
+| principalAmount | `float` | ✅ | Loan principal amount |
+| interestRate | `float` | ✅ | Annual interest rate (%) |
+| tenureMonths | `int` | ✅ | Loan duration in months |
+| processingFee | `float` | ✅ | Processing fee amount |
+| gstDeduction | `float` | ✅ | GST deduction amount |
+| preClosureChg | `float` | ✅ | Pre-closure charge (%) |
+
+**Response `201` — Success:**
+```json
+{
+  "id": "665f2b3c4d5e6f7a8b9c0d1e",
+  "borrowerId": "665f1a2b3c4d5e6f7a8b9c0d",
+  "principalAmount": 100000,
+  "interestRate": 12.5,
+  "tenureMonths": 12,
+  "processingFee": 2000,
+  "gstDeduction": 360,
+  "preClosureChg": 4,
+  "status": "PENDING",
+  "createdAt": "2026-03-27T11:00:00.000Z",
+  "updatedAt": "2026-03-27T11:00:00.000Z"
+}
+```
+
+**Response `404` — Borrower not found:**
+```json
+{
+  "message": "Borrower not found or invalid user role"
+}
+```
+
+---
+
+### 5. Get User Loans
+
+```
+GET /api/loans/user
+```
+
+**Auth:** 🔒 Bearer Token — **BORROWER** role only
+
+**Request Body:** None
+
+**Response `200` — Success:**
+```json
+[
+  {
+    "id": "665f2b3c4d5e6f7a8b9c0d1e",
+    "borrowerId": "665f1a2b3c4d5e6f7a8b9c0d",
+    "principalAmount": 100000,
+    "interestRate": 12.5,
+    "tenureMonths": 12,
+    "processingFee": 2000,
+    "gstDeduction": 360,
+    "preClosureChg": 4,
+    "status": "ACTIVE",
+    "createdAt": "2026-03-27T11:00:00.000Z",
+    "updatedAt": "2026-03-27T11:05:00.000Z",
+    "emis": [
+      {
+        "id": "665f3c4d5e6f7a8b9c0d1e2f",
+        "loanId": "665f2b3c4d5e6f7a8b9c0d1e",
+        "userId": "665f1a2b3c4d5e6f7a8b9c0d",
+        "dueDate": "2026-04-27T11:05:00.000Z",
+        "amount": 8884.88,
+        "status": "UNPAID",
+        "paidAt": null,
+        "createdAt": "2026-03-27T11:05:00.000Z",
+        "updatedAt": "2026-03-27T11:05:00.000Z"
+      }
+    ]
+  }
+]
+```
+
+> [!NOTE]
+> Returns an empty array `[]` if the borrower has no loans.
+
+---
+
+### 6. Accept Loan Offer
+
+```
+PUT /api/loans/:id/accept
+```
+
+**Auth:** 🔒 Bearer Token — **BORROWER** role only
+
+**URL Params:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| id | `string` | Loan ID to accept |
+
+**Request Body:** None
+
+**Logic:**
+1. Validates the loan exists and belongs to the authenticated borrower
+2. Checks loan status is `PENDING`
+3. Calculates EMI using: `EMI = P × r × (1+r)^n / ((1+r)^n − 1)` where `r = annual rate / 12 / 100`
+4. Creates one EMI record per month with due dates spaced monthly
+5. Updates loan status from `PENDING` → `ACTIVE` (within a transaction)
+
+**Response `200` — Success:**
+```json
+{
+  "message": "Loan accepted and EMIs generated"
+}
+```
+
+**Response `404` — Loan not found:**
+```json
+{
+  "message": "Loan not found"
+}
+```
+
+**Response `403` — Not the borrower:**
+```json
+{
+  "message": "Not authorized for this loan"
+}
+```
+
+**Response `400` — Already processed:**
+```json
+{
+  "message": "Loan offer already processed"
+}
+```
+
+---
+
+### 7. Pay EMI
+
+```
+POST /api/emis/:id/pay
+```
+
+**Auth:** 🔒 Bearer Token — **BORROWER** role only
+
+**URL Params:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| id | `string` | EMI record ID to pay |
+
+**Request Body:** None
+
+**Logic:**
+1. Validates the EMI exists and belongs to the authenticated user
+2. Checks EMI is not already `PAID`
+3. Updates EMI status to `PAID` and sets `paidAt` timestamp
+4. If all EMIs for the loan are now paid, auto-closes the loan (`status` → `CLOSED`)
+
+**Response `200` — Success:**
+```json
+{
+  "message": "EMI paid successfully",
+  "emi": {
+    "id": "665f3c4d5e6f7a8b9c0d1e2f",
+    "loanId": "665f2b3c4d5e6f7a8b9c0d1e",
+    "userId": "665f1a2b3c4d5e6f7a8b9c0d",
+    "dueDate": "2026-04-27T11:05:00.000Z",
+    "amount": 8884.88,
+    "status": "PAID",
+    "paidAt": "2026-04-25T09:30:00.000Z",
+    "createdAt": "2026-03-27T11:05:00.000Z",
+    "updatedAt": "2026-04-25T09:30:00.000Z"
+  }
+}
+```
+
+**Response `404` — EMI not found:**
+```json
+{
+  "message": "EMI record not found"
+}
+```
+
+**Response `403` — Not authorized:**
+```json
+{
+  "message": "Not authorized for this EMI"
+}
+```
+
+**Response `400` — Already paid:**
+```json
+{
+  "message": "EMI is already paid"
+}
+```
+
+---
+
+## Common Error Responses
+
+All protected endpoints may return these errors:
+
+| Status | Response | Cause |
+|--------|----------|-------|
+| `401` | `{ "message": "Not authorized, no token" }` | Missing `Authorization` header |
+| `401` | `{ "message": "Not authorized, token failed" }` | Invalid or expired JWT |
+| `401` | `{ "message": "Not authorized, user not found" }` | Token valid but user deleted |
+| `403` | `{ "message": "User role not authorized" }` | Correct token but wrong role |
+| `500` | `{ "message": "<error details>" }` | Internal server error |
+
+---
+
+## API Flow Summary
+
+```mermaid
+sequenceDiagram
+    participant B as Borrower
+    participant L as Lender
+    participant API as Backend API
+
+    B->>API: POST /api/auth/register (role: BORROWER)
+    API-->>B: { _id, token }
+
+    L->>API: POST /api/auth/register (role: LENDER)
+    API-->>L: { _id, token }
+
+    L->>API: POST /api/loans (borrowerId, amount, rate...)
+    API-->>L: Loan created (status: PENDING)
+
+    B->>API: GET /api/loans/user
+    API-->>B: List of loans with EMIs
+
+    B->>API: PUT /api/loans/:id/accept
+    API-->>B: Loan ACTIVE, EMIs generated
+
+    B->>API: POST /api/emis/:id/pay
+    API-->>B: EMI marked PAID
+
+    Note over API: When all EMIs paid → Loan auto-CLOSED
+```
