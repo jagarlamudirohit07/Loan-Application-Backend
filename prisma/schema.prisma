@@ -34,17 +34,20 @@ model Loan {
   lenderId        String?     @db.ObjectId   
   lender          User?       @relation("LenderLoans", fields: [lenderId], references: [id])
 
-  principalAmount Float
-  interestRate    Float
-  tenureMonths    Int
-  processingFee   Float
-  gstDeduction    Float
-  preClosureChg   Float
-  status          LoanStatus  @default(PENDING)
+  principalAmount    Float
+  interestRate       Float
+  tenureMonths       Int
+  processingFee      Float
+  gstDeduction       Float
+  preClosureChg      Float
+  status             LoanStatus  @default(PENDING)
+  remainingBalance   Float       @default(0)
+  preclosureCharges  Float       @default(0)
+  preclosureDate     DateTime?
 
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
-  emis            Emi[]       @relation("LoanEmis")
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+  emis               Emi[]       @relation("LoanEmis")
 }
 model Emi {
   id          String      @id @default(auto()) @map("_id") @db.ObjectId
@@ -76,11 +79,14 @@ enum LoanStatus {
   APPROVED
   REJECTED
   ACTIVE
-  CLOSED
+  UNPAID
+  PAID
+  PRECLOSURE
 }
 
 enum EmiStatus {
   UNPAID
   PAID
   LATE
+  CLOSED
 }

@@ -2,6 +2,11 @@ import { Response } from 'express';
 import prisma from '../config/db';
 import { AuthRequest } from '../middlewares/auth';
 import { calculateEMI } from '../services/emiCalculator';
+import {
+  markLoanAsPaid as markLoanAsPaidService,
+  precloseLoan as precloseLoanService,
+  calculateRemainingBalance,
+} from '../services/loanStatus.service';
 
 
 // ✅ CREATE LOAN OFFER (LENDER)
@@ -34,7 +39,7 @@ export const createLoanOffer = async (req: AuthRequest, res: Response): Promise<
     const loan = await prisma.loan.create({
       data: {
         borrowerId,
-        lenderId: req.user.id, // ✅ assign lender at creation
+        lenderId: req.user.id,
         principalAmount,
         interestRate,
         tenureMonths,
@@ -92,12 +97,59 @@ export const getLenderLoans = async (req: AuthRequest, res: Response): Promise<v
 };
 
 
+// ✅ GET SINGLE LOAN DETAILS WITH EMIs
+export const getLoanDetails = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const loanId = req.params.id;
+
+    const loan = await prisma.loan.findUnique({
+      where: { id: loanId },
+      include: {
+        emis: { orderBy: { dueDate: 'asc' } },
+        borrower: { select: { id: true, name: true, email: true } },
+        lender: { select: { id: true, name: true, email: true } },
+      },
+    });
+
+    if (!loan) {
+      res.status(404).json({ message: 'Loan not found' });
+      return;
+    }
+
+    // Ensure user is either the borrower or the lender
+    if (loan.borrowerId !== req.user.id && loan.lenderId !== req.user.id) {
+      res.status(403).json({ message: 'Not authorized to view this loan' });
+      return;
+    }
+
+    // Calculate live remaining balance
+    const remainingBalance = await calculateRemainingBalance(loanId);
+
+    const paidEmis = loan.emis.filter((e) => e.status === 'PAID').length;
+    const unpaidEmis = loan.emis.filter((e) => e.status === 'UNPAID' || e.status === 'LATE').length;
+    const closedEmis = loan.emis.filter((e) => e.status === 'CLOSED').length;
+
+    res.json({
+      ...loan,
+      remainingBalance,
+      emiSummary: {
+        total: loan.emis.length,
+        paid: paidEmis,
+        unpaid: unpaidEmis,
+        closed: closedEmis,
+      },
+    });
+  } catch (error: any) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+
 // ✅ LENDER APPROVES LOAN
 export const acceptLoanOffer = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const loanId = req.params.id;
 
-    // ✅ Only lender can approve
     if (req.user.role !== 'LENDER') {
       res.status(403).json({ message: 'Only lenders can approve loans' });
       return;
@@ -112,7 +164,6 @@ export const acceptLoanOffer = async (req: AuthRequest, res: Response): Promise<
       return;
     }
 
-    // ✅ Ensure lender owns this loan
     if (loan.lenderId !== req.user.id) {
       res.status(403).json({ message: 'Not authorized for this loan' });
       return;
@@ -123,7 +174,7 @@ export const acceptLoanOffer = async (req: AuthRequest, res: Response): Promise<
       return;
     }
 
-    // ✅ EMI calculation
+    // EMI calculation
     const emiAmount = calculateEMI(
       loan.principalAmount,
       loan.interestRate,
@@ -139,26 +190,35 @@ export const acceptLoanOffer = async (req: AuthRequest, res: Response): Promise<
 
       emis.push({
         loanId: loan.id,
-        userId: loan.borrowerId, // ✅ borrower pays EMI
+        userId: loan.borrowerId,
         amount: emiAmount,
         dueDate,
         status: 'UNPAID',
       });
     }
 
-    // ✅ Transaction
+    // Total remaining balance = sum of all EMIs
+    const totalRemainingBalance = parseFloat((emiAmount * loan.tenureMonths).toFixed(2));
+
+    // Transaction: update loan status + create EMIs
     await prisma.$transaction(async (tx) => {
       await tx.loan.update({
         where: { id: loan.id },
         data: {
           status: 'ACTIVE',
+          remainingBalance: totalRemainingBalance,
         },
       });
 
       await tx.emi.createMany({ data: emis });
     });
 
-    res.json({ message: 'Loan approved and EMIs generated' });
+    res.json({
+      message: 'Loan approved and EMIs generated',
+      emiAmount: parseFloat(emiAmount.toFixed(2)),
+      totalEmis: loan.tenureMonths,
+      remainingBalance: totalRemainingBalance,
+    });
 
   } catch (error: any) {
     res.status(500).json({ message: error.message });
@@ -166,7 +226,7 @@ export const acceptLoanOffer = async (req: AuthRequest, res: Response): Promise<
 };
 
 
-// ✅ OPTIONAL: LENDER REJECT LOAN
+// ✅ LENDER REJECTS LOAN
 export const rejectLoanOffer = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const loanId = req.params.id;
@@ -206,6 +266,75 @@ export const rejectLoanOffer = async (req: AuthRequest, res: Response): Promise<
     res.status(500).json({ message: error.message });
   }
 };
+
+
+// ✅ MARK LOAN AS FULLY PAID (LENDER)
+export const markLoanPaid = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const loanId = req.params.id;
+
+    // Verify lender owns this loan
+    const loan = await prisma.loan.findUnique({
+      where: { id: loanId },
+    });
+
+    if (!loan) {
+      res.status(404).json({ message: 'Loan not found' });
+      return;
+    }
+
+    if (loan.lenderId !== req.user.id) {
+      res.status(403).json({ message: 'Not authorized for this loan' });
+      return;
+    }
+
+    const updatedLoan = await markLoanAsPaidService(loanId);
+
+    res.json({
+      message: 'Loan marked as fully paid. All EMIs cleared.',
+      loan: updatedLoan,
+    });
+  } catch (error: any) {
+    const statusCode = error.message.includes('Cannot mark') ? 400 : 500;
+    res.status(statusCode).json({ message: error.message });
+  }
+};
+
+
+// ✅ PRECLOSURE (BORROWER or LENDER)
+export const precloseLoanController = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const loanId = req.params.id;
+
+    // Verify user is borrower or lender of this loan
+    const loan = await prisma.loan.findUnique({
+      where: { id: loanId },
+    });
+
+    if (!loan) {
+      res.status(404).json({ message: 'Loan not found' });
+      return;
+    }
+
+    if (loan.borrowerId !== req.user.id && loan.lenderId !== req.user.id) {
+      res.status(403).json({ message: 'Not authorized for this loan' });
+      return;
+    }
+
+    const settlement = await precloseLoanService(loanId);
+
+    res.json({
+      message: 'Loan preclosed successfully',
+      settlement,
+    });
+  } catch (error: any) {
+    const statusCode = error.message.includes('Cannot preclose') ? 400 : 500;
+    res.status(statusCode).json({ message: error.message });
+  }
+};
+
+
+// ✅ GET ALL BORROWERS (LENDER utility)
 export const getBorrowers = async (req: AuthRequest, res: Response) => {
   const borrowers = await prisma.user.findMany({
     where: { role: 'BORROWER' },
