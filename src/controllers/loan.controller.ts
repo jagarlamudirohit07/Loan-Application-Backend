@@ -273,7 +273,6 @@ export const markLoanPaid = async (req: AuthRequest, res: Response): Promise<voi
   try {
     const loanId = req.params.id;
 
-    // Verify lender owns this loan
     const loan = await prisma.loan.findUnique({
       where: { id: loanId },
     });
